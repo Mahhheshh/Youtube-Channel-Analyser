@@ -1,6 +1,8 @@
 ![banner](Preview/Dashboard.png)
 ![Python version](https://img.shields.io/badge/Python%20version-3.10%2B-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
+[![Check Live App](https://img.shields.io/badge/Check-Live%20APP-red)](https://mahhheshh-youtube-channel-analyser-main-elawst.streamlit.app/)
+
 
 # Youtube-Channel-Analyser
 
