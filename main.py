@@ -1,6 +1,7 @@
 import streamlit as st
-from Utils.ytapi import YouTube
+from Utils.Youtube import YouTube, YouTubeException
 from Utils.dataframe import Visualize
+
 
 st.set_page_config(
     page_title="Youtube App",
@@ -18,7 +19,11 @@ st.set_page_config(
 def get_data(api_key, c_name):
     yt = YouTube()    
     with st.spinner("Fetching data from YouTube Data API V3"):
-        data = yt.main(c_name, api_key)
+        try:
+            data = yt.main(c_name, api_key)
+        except YouTubeException as e:
+            st.warning(e)
+            st.stop()
     if data is not None:
         try:
             data = Visualize(data)
@@ -43,6 +48,7 @@ if "log_y" not in st.session_state:
 if "animate" not in st.session_state:
     st.session_state.animate = False
 
+
 with st.sidebar:
     st.markdown("""
             # ![image](https://emojipedia-us.s3.amazonaws.com/content/2020/04/05/yt.png)YouTube App
@@ -55,7 +61,11 @@ with st.sidebar:
             st.stop()
         else:
             data, date, sub_count, video_count, c_name = get_data(api_key=API_KEY, c_name=channel_name)
-            file = data.save()
+            try:
+                file = data.save()
+            except Exception as e:
+                file = None
+                st.warning(e)
     st.download_button("Download data as csv", data=file, key="download", file_name=f"{channel_name}.csv", mime="text/csv")
 
 with st.container():
