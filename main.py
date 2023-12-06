@@ -1,7 +1,6 @@
+import asyncio
 import streamlit as st
-from Utils.Youtube import YouTube, YouTubeException
-from Utils.dataframe import Visualize
-
+from Utils import AsyncYoutube, Visualize, rewaitable
 
 st.set_page_config(
     page_title="Youtube App",
@@ -10,128 +9,149 @@ st.set_page_config(
     layout="wide",
 )
 
-@st.experimental_memo(
-    ttl=6000,
-    suppress_st_warning=True,
-    max_entries=3,
-    show_spinner=False
-)
-def get_data(api_key, c_name):
-    yt = YouTube()    
+
+@st.cache_resource(ttl=1800, max_entries=3, show_spinner=False)
+@rewaitable
+async def get_data(channel_name: str, api_key: str) -> tuple[Visualize, dict]:
+    yt = AsyncYoutube()
     with st.spinner("Fetching data from YouTube Data API V3"):
         try:
-            data = yt.main(c_name, api_key)
-        except YouTubeException as e:
-            st.warning(e)
+            data = await yt.retrieve_channel_data(
+                channel_name=channel_name, api_key=api_key
+            )
+            visualize_obj = Visualize(data.pop("data"))
+            return (visualize_obj, data)
+        except Exception as err:
+            st.error(err)
             st.stop()
-    if data is not None:
-        try:
-            data = Visualize(data)
-        except Exception as e:
-            st.warning("Error while creating Pandas Dataframe")
-        date = yt.creation_date
-        sub_count =  yt.sub_count
-        video_count = yt.video_count
-        c_name = yt.channel_name
-        return data, date, sub_count, video_count, c_name
-    else:
-        st.warning("Error while creating data")
+
 
 def whitespace(number_of_lines):
     for _ in range(number_of_lines):
         st.write("\n")
 
-if "log_x" not in st.session_state:
-    st.session_state.log_x = False
-if "log_y" not in st.session_state:
-    st.session_state.log_y = False
-if "animate" not in st.session_state:
-    st.session_state.animate = False
 
+async def main():
+    if "log_x" not in st.session_state:
+        st.session_state.log_x = False
+    if "log_y" not in st.session_state:
+        st.session_state.log_y = False
+    if "animate" not in st.session_state:
+        st.session_state.animate = False
 
-with st.sidebar:
-    st.markdown("""
-            # ![image](https://emojipedia-us.s3.amazonaws.com/content/2020/04/05/yt.png)YouTube App
-            """)
-    with st.form("user-input"):
-        API_KEY = st.text_input("Your API KEY", help="Get Key from https://console.cloud.google.com/apis/api/youtube.googleapis.com")
-        channel_name = st.text_input("Channel Name")
-        submitted = st.form_submit_button("Run")
-        if (not submitted) and (API_KEY == "") and (channel_name == ""):
-            st.stop()
-        else:
-            data, date, sub_count, video_count, c_name = get_data(api_key=API_KEY, c_name=channel_name)
-            try:
-                file = data.save()
-            except Exception as e:
-                file = None
-                st.warning(e)
-    st.download_button("Download data as csv", data=file, key="download", file_name=f"{channel_name}.csv", mime="text/csv")
-
-with st.container():
-    snippets_col, stats_col, popular_col = st.columns(3)
-    with snippets_col:
+    with st.sidebar:
         st.markdown(
-            f"""
-            ## Snippet \n
-            Channel Name - {c_name.title()}\n
-            Creation date - {date}\n
-            subscriber count - {sub_count}\n
-            No of videos - {data.df.shape[0]}/{video_count}\n
             """
+                # ![image](https://emojipedia-us.s3.amazonaws.com/content/2020/04/05/yt.png)YouTube App
+                """
         )
-    with stats_col:
-        st.markdown(
-            f"""
-            ## Stats\n
-            Likes :heart: - {data.total_likes()}\n
-            Comments :speech_balloon: - {data.total_comments()}\n
-            Views :eyes: - {data.total_views()}\n
-            Content Length :hourglass: - {data.get_content_length()}hrs\n
-            """
+        with st.form("user-input"):
+            submitted = False
+            API_KEY = st.text_input(
+                "Your API KEY",
+                help="Get Key from https://console.cloud.google.com/apis/api/youtube.googleapis.com",
+            )
+            channel_name = st.text_input("Channel Name")
+            submitted = st.form_submit_button("Run")
+            file = None
+            if (submitted) and (API_KEY == "") or (channel_name == ""):
+                st.stop()
+            else:
+                try:
+                    visualize_obj, channel_info = await get_data(
+                        channel_name=channel_name, api_key=API_KEY
+                    )
+                    file = visualize_obj.save()
+                except Exception as error:
+                    st.warning(error)
+                    st.stop()
+        if file:
+            st.download_button(
+                "Download data as csv",
+                data=file,
+                key="download",
+                file_name=f"{channel_name}.csv",
+                mime="text/csv",
+            )
+
+    with st.container():
+        snippets_col, stats_col, popular_col = st.columns(3)
+        with snippets_col:
+            st.markdown(
+                f"""
+                ## Snippet \n
+                Channel Name - {channel_info.get('channel_name').title()}\n
+                Creation date - {channel_info.get('creation_date')}\n
+                subscriber count - {channel_info.get('video_count')}\n
+                No of videos - {visualize_obj.df.shape[0]}/{channel_info.get('video_count')}\n
+                """
+            )
+        with stats_col:
+            st.markdown(
+                f"""
+                ## Stats\n
+                Likes :heart: - {visualize_obj.total_likes()}\n
+                Comments :speech_balloon: - {visualize_obj.total_comments()}\n
+                Views :eyes: - {visualize_obj.total_views()}\n
+                Content Length :hourglass: - {visualize_obj.get_content_length()}hrs\n
+                """
+            )
+        with popular_col:
+            st.markdown(
+                f"""
+                ## Most Popular\n
+                :heart: - {visualize_obj.most_liked_video()[0]} :thumbsup: {int(visualize_obj.most_liked_video()[1])}\n
+                :speech_balloon: - {visualize_obj.most_commented_video()[0]} :speech_balloon: {int(visualize_obj.most_commented_video()[1])}\n
+                :eyes: - {visualize_obj.most_viewed_video()[0]} :man::woman::boy::girl: {int(visualize_obj.most_viewed_video()[1])}\n
+                """
+            )
+
+        st.subheader(
+            f"Top 10 viewed videos from {channel_info.get('channel_name').title()}"
         )
-    with popular_col:
-        st.markdown(
-            f"""
-            ## Most Popular\n
-            :heart: - {data.most_liked_video()[0]} :thumbsup: {int(data.most_liked_video()[1])}\n
-            :speech_balloon: - {data.most_commented_video()[0]} :speech_balloon: {int(data.most_commented_video()[1])}\n
-            :eyes: - {data.most_viewed_video()[0]} :man::woman::boy::girl: {int(data.most_viewed_video()[1])}\n
-            """
-        )
+        top_ten_videos_plot = visualize_obj.top_ten_videos()
+        st.plotly_chart(top_ten_videos_plot, True)
 
-    st.subheader(f"Top 10 viewed videos from {c_name.title()}")
-    top_ten_videos_plot = data.top_ten_videos()
-    st.plotly_chart(top_ten_videos_plot, True)
+        st.subheader("Video Upload Frequency per Year")
+        fre_plot_fig = visualize_obj.video_upload_freq()
+        st.plotly_chart(fre_plot_fig, True)
 
-    st.subheader("Video Upload Frequency per Year")
-    fre_plot_fig = data.video_upload_freq()
-    st.plotly_chart(fre_plot_fig, True)
+        st.subheader("Video Duration Vs Number of Views")
+        plot_col, seetings_col = st.columns([8, 1])
+        with seetings_col:
+            whitespace(10)
+            log_x = st.checkbox("Enable Log_X", value=False, key="Enable_logx")
+            log_y = st.checkbox("Enable Log_Y", value=False, key="Enable_logy")
+            animate = st.checkbox("Animate Plot", value=False, key="animate_plots")
+        if log_x:
+            st.session_state.log_x = True
+        if log_y:
+            st.session_state.log_y = True
+        if animate:
+            st.session_state.animate = True
+        fig = visualize_obj.duration_vs_views(log_x, log_y, animate)
+        with plot_col:
+            st.plotly_chart(fig)
 
-    st.subheader("Video Duration Vs Number of Views")
-    plot_col, seetings_col = st.columns([8, 1]) 
-    with seetings_col:
-        whitespace(10)
-        log_x = st.checkbox("Enable Log_X", value=False, key="Enable_logx")
-        log_y = st.checkbox("Enable Log_Y", value=False, key="Enable_logy")
-        animate = st.checkbox("Animate Plot", value=False, key="animate_plots")
-    if log_x:
-        st.session_state.log_x = True
-    if log_y:
-        st.session_state.log_y = True
-    if animate:
-        st.session_state.animate = True
-    fig = data.duration_vs_views(log_x, log_y, animate)
-    with plot_col:  
-        st.plotly_chart(fig)
+        fig_col, input_col = st.columns([8, 1])
+        with input_col:
+            whitespace(10)
+            year = st.number_input(
+                "Select Year",
+                min_value=visualize_obj.years[0],
+                max_value=visualize_obj.years[-1],
+                step=1,
+                help=f"{visualize_obj.years}",
+                value=visualize_obj.years[-1],
+                key="select_year",
+            )
+        views_per_year_plot = visualize_obj.views_per_year(year)
+        with fig_col:
+            st.plotly_chart(views_per_year_plot, True)
 
-    fig_col, input_col = st.columns([8, 1])
-    with input_col:
-        whitespace(10)
-        year = st.number_input("Select Year", min_value=data.years[0], max_value=data.years[-1],step=1,help=f"{data.years}", value=data.years[-1], key="select_year")
-    views_per_year_plot = data.views_per_year(year)
-    with fig_col:
-        st.plotly_chart(views_per_year_plot, True)
+        last_fifty_plot = visualize_obj.last_fifty_uploads()
+        st.plotly_chart(last_fifty_plot, True)
 
-    last_fifty_plot = data.last_fifty_uploads()
-    st.plotly_chart(last_fifty_plot, True)
+
+if __name__ == "__main__":
+    asyncio.run(main())
